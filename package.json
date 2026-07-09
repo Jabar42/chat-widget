@@ -1,0 +1,32 @@
+{
+  "name": "@tp3/chat-widget",
+  "version": "0.2.0",
+  "description": "Chat widget React para Hermes Agent — WebSocket directo.",
+  "main": "dist/ChatWidget.js",
+  "module": "dist/ChatWidget.mjs",
+  "types": "dist/ChatWidget.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/ChatWidget.mjs",
+      "require": "./dist/ChatWidget.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/ChatWidget.tsx --format esm,cjs --dts --external react",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0"
+  },
+  "keywords": ["chat", "widget", "hermes", "websocket", "react"],
+  "license": "MIT"
+}
