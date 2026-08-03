@@ -97,7 +97,11 @@ function ChatWidgetInner({
 
   const allMessages = welcomeShown || messages.length > 0 ? messages : [];
 
-  const loading = status === "streaming" || status === "connecting";
+  // Only a real in-flight stream disables the input. "connecting" and
+  // "disconnected" must NOT block typing or show the typing dots — a dead
+  // socket would otherwise leave the widget stuck on three dots with a
+  // disabled input (the reported bug).
+  const loading = status === "streaming";
   // The welcome bubble must show even while the WebSocket is connecting —
   // otherwise the panel looks dead (blank + typing dots) until the socket
   // opens. Connection failures should not hide the greeting either.
@@ -284,6 +288,17 @@ function ChatWidgetInner({
 
             <div ref={messagesEnd} />
           </div>
+
+          {status === "disconnected" && (
+            <div style={{
+              padding: "6px 16px", fontSize: 12, textAlign: "center",
+              background: "var(--chat-error-bg, #FEE2E2)",
+              color: "var(--chat-error-text, #B91C1C)",
+              borderTop: "1px solid var(--chat-error-border, #FECACA)",
+            }}>
+              ⚠️ No se pudo conectar con el servidor. Verificá tu conexión e intentá de nuevo.
+            </div>
+          )}
 
           <div style={{
             display: "flex", gap: 8, padding: "12px 16px 16px",

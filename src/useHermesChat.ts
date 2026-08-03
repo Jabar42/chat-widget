@@ -18,7 +18,7 @@ export interface Message {
   timestamp: number;
 }
 
-type Status = "idle" | "connecting" | "streaming";
+type Status = "idle" | "connecting" | "streaming" | "disconnected";
 
 export interface FrameStatus {
   type: "status";
@@ -158,12 +158,17 @@ export function useHermesChat(
   const currentMsgIdRef = useRef<string>("");
   const reconnectAttempt = useRef<number>(0);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const streamTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ---- WebSocket message handler ----
   const handleFrame = useCallback((frame: Frame) => {
     switch (frame.type) {
       case "token":
         currentTextRef.current += frame.text;
+        if (streamTimeout.current) {
+          clearTimeout(streamTimeout.current);
+          streamTimeout.current = null;
+        }
         // Update the last assistant message live. If no assistant message is
         // active (a "done" already closed the previous segment — e.g. an
         // interim commentary before a tool call), OPEN A NEW assistant message
@@ -196,16 +201,31 @@ export function useHermesChat(
         // Finalise the current assistant message
         currentTextRef.current = "";
         currentMsgIdRef.current = "";
+        if (streamTimeout.current) {
+          clearTimeout(streamTimeout.current);
+          streamTimeout.current = null;
+        }
         setStatus("idle");
         break;
 
       case "status":
         if (frame.status === "typing") {
           setStatus("streaming");
+          // Streaming watchdog: if the server goes silent mid-stream (no
+          // token/done ever arrives), drop back to idle so the input is not
+          // disabled forever on the typing indicator.
+          if (streamTimeout.current) clearTimeout(streamTimeout.current);
+          streamTimeout.current = setTimeout(() => {
+            setStatus((s) => (s === "streaming" ? "idle" : s));
+          }, 30000);
         }
         break;
 
       case "error":
+        if (streamTimeout.current) {
+          clearTimeout(streamTimeout.current);
+          streamTimeout.current = null;
+        }
         setMessages((prev) => [
           ...prev,
           {
@@ -253,11 +273,16 @@ export function useHermesChat(
 
     ws.onclose = () => {
       wsRef.current = null;
+      clearTimeout(connectTimer);
       // Auto-reconnect with backoff if not intentional
       if (reconnectAttempt.current < 5) {
         const delay = Math.min(1000 * 2 ** reconnectAttempt.current, 10000);
         reconnectAttempt.current += 1;
         reconnectTimer.current = setTimeout(() => connect(), delay);
+      } else {
+        // Give up: terminal state. The UI must not stay stuck on the
+        // typing indicator with a disabled input — surface the failure.
+        setStatus("disconnected");
       }
     };
 
@@ -273,6 +298,10 @@ export function useHermesChat(
     if (reconnectTimer.current) {
       clearTimeout(reconnectTimer.current);
       reconnectTimer.current = null;
+    }
+    if (streamTimeout.current) {
+      clearTimeout(streamTimeout.current);
+      streamTimeout.current = null;
     }
     if (wsRef.current) {
       wsRef.current.onclose = null; // prevent reconnect
@@ -299,9 +328,11 @@ export function useHermesChat(
     (text: string) => {
       if (!text.trim()) return;
       if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-        // Try reconnecting
+        // Try reconnecting, but do NOT fake a streaming turn: the message
+        // cannot be delivered, and setting "streaming" here would stick the
+        // UI on the typing indicator with a disabled input forever.
         connect();
-        // Still add user message so UX feels responsive
+        return;
       }
 
       const userMsg: Message = {
@@ -327,15 +358,13 @@ export function useHermesChat(
       setStatus("streaming");
 
       // Send via WebSocket
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(
-          JSON.stringify({
-            type: "message",
-            text: text.trim(),
-            sessionId: sessionIdRef.current,
-          })
-        );
-      }
+      wsRef.current.send(
+        JSON.stringify({
+          type: "message",
+          text: text.trim(),
+          sessionId: sessionIdRef.current,
+        })
+      );
     },
     [connect]
   );

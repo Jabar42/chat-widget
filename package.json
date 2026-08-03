@@ -1,6 +1,6 @@
 {
   "name": "@tp3/chat-widget",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Chat widget React para Hermes Agent — WebSocket directo.",
   "main": "dist/ChatWidget.js",
   "module": "dist/ChatWidget.mjs",
