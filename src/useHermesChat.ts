@@ -225,12 +225,19 @@ export function useHermesChat(
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
     setStatus("connecting");
+    // If the socket does not open within CONNECT_TIMEOUT_MS, drop out of
+    // "connecting" so the UI does not stay stuck on the typing indicator
+    // with a disabled input forever (e.g. wrong host, no server, offline).
+    const connectTimer = setTimeout(() => {
+      setStatus((s) => (s === "connecting" ? "idle" : s));
+    }, 8000);
 
     // Ensure trailing slash and session path
     let url = hermesUrl.replace(/\/+$/, "");
     const ws = new WebSocket(url);
 
     ws.onopen = () => {
+      clearTimeout(connectTimer);
       reconnectAttempt.current = 0;
       setStatus("idle");
     };

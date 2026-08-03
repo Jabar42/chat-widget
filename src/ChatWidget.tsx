@@ -75,7 +75,17 @@ function ChatWidgetInner({
   });
   const [closing, setClosing] = useState(false);
   const [input, setInput] = useState("");
-  const [welcomeShown, setWelcomeShown] = useState(false);
+  // If the widget mounts already open (persisted state), the welcome message
+  // must be visible too — otherwise the panel shows blank with no greeting.
+  // Only skip the welcome when there is restored history (messages exist).
+  const [welcomeShown, setWelcomeShown] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return localStorage.getItem("hermes-chat-open") === "1";
+    } catch {
+      return false;
+    }
+  });
 
   const messagesEnd = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -85,7 +95,13 @@ function ChatWidgetInner({
     sessionNamespace: "default",
   });
 
+  const allMessages = welcomeShown || messages.length > 0 ? messages : [];
+
   const loading = status === "streaming" || status === "connecting";
+  // The welcome bubble must show even while the WebSocket is connecting —
+  // otherwise the panel looks dead (blank + typing dots) until the socket
+  // opens. Connection failures should not hide the greeting either.
+  const welcomeVisible = welcomeShown && allMessages.length === 0 && status !== "streaming";
 
   // Mirror the open state to localStorage so it survives remounts.
   useEffect(() => {
@@ -106,8 +122,6 @@ function ChatWidgetInner({
       return () => clearTimeout(timer);
     }
   }, [open, loading]);
-
-  const allMessages = welcomeShown || messages.length > 0 ? messages : [];
 
   function handleSend() {
     const text = input.trim();
@@ -220,7 +234,7 @@ function ChatWidgetInner({
           }}>
             <div style={{ flex: 1, minHeight: 0 }} />
 
-            {welcomeShown && allMessages.length === 0 && !loading && (
+            {welcomeVisible && (
               <div className="bot-msg" style={{
                 maxWidth: "85%", padding: "10px 14px", borderRadius: 16,
                 fontSize: 14, lineHeight: 1.45, alignSelf: "flex-start",
