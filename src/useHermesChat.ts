@@ -81,6 +81,54 @@ function getOrCreateSessionId(namespace: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Message history persistence (same 30-min TTL as the session id, so the
+// history survives page navigation — Astro remounts the widget on every
+// route — but is discarded once the session expires).
+// ---------------------------------------------------------------------------
+
+const HISTORY_TTL = 30 * 60 * 1000; // must match session TTL
+
+function loadHistory(namespace: string): Message[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const key = `hermes-chat-history-${namespace}`;
+    const tsKey = `${key}-ts`;
+    const stored = localStorage.getItem(key);
+    const storedTs = localStorage.getItem(tsKey);
+    const now = Date.now();
+    if (stored && storedTs && now - Number(storedTs) < HISTORY_TTL) {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed)) return parsed as Message[];
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(namespace: string, messages: Message[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    const key = `hermes-chat-history-${namespace}`;
+    localStorage.setItem(key, JSON.stringify(messages));
+    localStorage.setItem(`${key}-ts`, String(Date.now()));
+  } catch {
+    // Storage full / unavailable — history is best-effort
+  }
+}
+
+function clearStoredHistory(namespace: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    const key = `hermes-chat-history-${namespace}`;
+    localStorage.removeItem(key);
+    localStorage.removeItem(`${key}-ts`);
+  } catch {
+    // ignore
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
 
@@ -90,7 +138,9 @@ export function useHermesChat(
   const { hermesUrl, sessionId: externalSessionId, sessionNamespace } = options;
   const namespace = sessionNamespace || "default";
 
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>(() =>
+    loadHistory(namespace)
+  );
   const [status, setStatus] = useState<Status>("idle");
 
   // SSR guard: skip hook logic during server-side rendering
@@ -231,6 +281,12 @@ export function useHermesChat(
     return () => disconnect();
   }, [connect, disconnect]);
 
+  // Persist history on every change so a page navigation (Astro remount)
+  // restores the visible conversation for the same session.
+  useEffect(() => {
+    saveHistory(namespace, messages);
+  }, [namespace, messages]);
+
   // ---- Send message ----
   const sendMessage = useCallback(
     (text: string) => {
@@ -282,7 +338,8 @@ export function useHermesChat(
     setMessages([]);
     currentTextRef.current = "";
     currentMsgIdRef.current = "";
-  }, []);
+    clearStoredHistory(namespace);
+  }, [namespace]);
 
   return { messages, status, sendMessage, clearHistory };
 }

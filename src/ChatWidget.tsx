@@ -62,7 +62,17 @@ function ChatWidgetInner({
   brandSubtitle,
   welcomeMessage,
 }: Required<ChatWidgetProps>) {
-  const [open, setOpen] = useState(false);
+  // Persist the open state across page navigation: Astro remounts the widget
+  // on every route (client:load), so a plain useState(false) would collapse
+  // the window every time the user changes page.
+  const [open, setOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return localStorage.getItem("hermes-chat-open") === "1";
+    } catch {
+      return false;
+    }
+  });
   const [closing, setClosing] = useState(false);
   const [input, setInput] = useState("");
   const [welcomeShown, setWelcomeShown] = useState(false);
@@ -76,6 +86,15 @@ function ChatWidgetInner({
   });
 
   const loading = status === "streaming" || status === "connecting";
+
+  // Mirror the open state to localStorage so it survives remounts.
+  useEffect(() => {
+    try {
+      localStorage.setItem("hermes-chat-open", open ? "1" : "0");
+    } catch {
+      // ignore — state persistence is best-effort
+    }
+  }, [open]);
 
   useEffect(() => {
     messagesEnd.current?.scrollIntoView({ behavior: "smooth" });
