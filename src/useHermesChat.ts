@@ -114,14 +114,31 @@ export function useHermesChat(
     switch (frame.type) {
       case "token":
         currentTextRef.current += frame.text;
-        // Update the last assistant message live
+        // Update the last assistant message live. If no assistant message is
+        // active (a "done" already closed the previous segment — e.g. an
+        // interim commentary before a tool call), OPEN A NEW assistant message
+        // instead of silently dropping the token. Without this, the final
+        // response after an MCP/tool call never reaches the chat (the agent
+        // "goes away and never comes back" even though the task completed).
         setMessages((prev) => {
           const copy = [...prev];
           const last = copy[copy.length - 1];
           if (last?.role === "assistant" && last.id === currentMsgIdRef.current) {
             copy[copy.length - 1] = { ...last, text: currentTextRef.current };
+            return copy;
           }
-          return copy;
+          // New segment after a done: open a fresh assistant message.
+          const newId = `assistant-${Date.now()}-${copy.length}`;
+          currentMsgIdRef.current = newId;
+          return [
+            ...copy,
+            {
+              id: newId,
+              role: "assistant",
+              text: currentTextRef.current,
+              timestamp: Date.now(),
+            },
+          ];
         });
         break;
 
