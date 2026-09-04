@@ -305,9 +305,23 @@ function ChatWidgetInner({
 export default function ChatWidget(props: ChatWidgetProps) {
   const { hermesUrl, brandName, brandSubtitle, welcomeMessage } = props;
 
-  // During SSR, render nothing. The component only mounts on the client.
-  if (typeof window === "undefined" || typeof document === "undefined") {
-    // Return a placeholder div so Astro can mount via client:load
+  // The widget only works in the browser, but branching on `typeof window`
+  // breaks React hydration: the server renders the placeholder and the client
+  // renders the full widget on its *first* render, so the trees don't match.
+  // React then throws #418 and, rather than patching the difference, discards
+  // the server HTML and re-renders the whole page on the client.
+  //
+  // Gating on mount instead keeps the first client render identical to the
+  // server's — both produce the placeholder — and swaps in the widget from an
+  // effect, which runs after hydration has finished. Astro's `client:load`
+  // still gets its placeholder div to mount into.
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) {
     return <div id="hermes-chat-ssr-placeholder" />;
   }
 
