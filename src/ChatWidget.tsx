@@ -90,6 +90,16 @@ export function renderMarkdown(text: string): string {
   return html;
 }
 
+/**
+ * Messages worth drawing. `sendMessage` appends an empty assistant placeholder
+ * so the streamed tokens have somewhere to land; until the first token arrives
+ * that turn is represented by the typing indicator, not by an empty bubble.
+ * Exported so the rule can be tested against the built bundle.
+ */
+export function visibleMessages(messages: Message[]): Message[] {
+  return messages.filter((m) => m.role !== "assistant" || Boolean(m.kind) || m.text.length > 0);
+}
+
 const DEFAULTS = {
   brandName: "Tp3studio",
   brandSubtitle: "Asistente virtual",
@@ -750,7 +760,7 @@ function ChatWidgetInner({
               </div>
             )}
 
-            {allMessages.map((msg: Message) => {
+            {visibleMessages(allMessages).map((msg: Message) => {
               if (msg.role === "user") {
                 return (
                   <div

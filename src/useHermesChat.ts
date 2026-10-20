@@ -343,6 +343,7 @@ export function useHermesChat(
           clearTimeout(streamTimeout.current);
           streamTimeout.current = null;
         }
+        setMessages(dropEmptyAssistant);
         setStatus("idle");
         break;
 
@@ -354,6 +355,7 @@ export function useHermesChat(
           // disabled forever on the typing indicator.
           if (streamTimeout.current) clearTimeout(streamTimeout.current);
           streamTimeout.current = setTimeout(() => {
+            setMessages(dropEmptyAssistant);
             setStatus((s) => (s === "streaming" ? "idle" : s));
           }, 30000);
         }
@@ -419,7 +421,7 @@ export function useHermesChat(
           streamTimeout.current = null;
         }
         setMessages((prev) => [
-          ...prev,
+          ...dropEmptyAssistant(prev),
           {
             id: `error-${Date.now()}`,
             role: "assistant",
