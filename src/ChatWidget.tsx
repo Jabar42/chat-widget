@@ -40,6 +40,18 @@ export interface ChatWidgetProps {
   teaserMessage?: string;
   /** Launcher pill text when `agentName` is set; default: "Chatea con {agentName}". */
   launcherLabel?: string;
+  /**
+   * "floating" (default): launcher + panel fixed to the bottom-right corner.
+   * "inline": the panel alone, always open, laid out where the component is
+   * rendered (a section of a landing page). No launcher, no teaser.
+   */
+  mode?: "floating" | "inline";
+  /** Panel height in inline mode, default 560. */
+  inlineHeight?: number;
+  /** Small print under the input, e.g. "Asistente de IA. Puede equivocarse." Empty hides it. */
+  disclaimer?: string;
+  /** Max characters per message, default 1500. */
+  maxLength?: number;
 }
 
 /**
@@ -248,11 +260,16 @@ function ChatWidgetInner({
   teaserDelay = 0,
   teaserMessage,
   launcherLabel,
+  mode = "floating",
+  inlineHeight = 560,
+  disclaimer = "",
+  maxLength = 1500,
 }: ChatWidgetProps) {
+  const inline = mode === "inline";
   // Persist the open state across page navigation: Astro remounts the widget
   // on every route (client:load), so a plain useState(false) would collapse
   // the window every time the user changes page.
-  const [open, setOpen] = useState<boolean>(() => readSession(OPEN_KEY) === "1");
+  const [open, setOpen] = useState<boolean>(() => inline || readSession(OPEN_KEY) === "1");
   const [closing, setClosing] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [input, setInput] = useState("");
@@ -261,11 +278,15 @@ function ChatWidgetInner({
   // must be visible too — otherwise the panel shows blank with no greeting.
   // Only skip the welcome when there is restored history (messages exist).
   const [welcomeShown, setWelcomeShown] = useState<boolean>(
-    () => readSession(OPEN_KEY) === "1"
+    () => inline || readSession(OPEN_KEY) === "1"
   );
 
   const messagesEnd = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const windowRef = useRef<HTMLDivElement>(null);
+  const launcherRef = useRef<HTMLButtonElement>(null);
+  // Set by closeChat: when the panel unmounts, focus goes back to the launcher.
+  const restoreFocus = useRef(false);
 
   const { messages, status, sendMessage, sendFormSubmit, clearHistory } = useHermesChat({
     hermesUrl,
@@ -293,30 +314,83 @@ function ChatWidgetInner({
 
   // Mirror the open state so it survives remounts (same tab only).
   useEffect(() => {
-    writeSession(OPEN_KEY, open ? "1" : "0");
+    if (!inline) writeSession(OPEN_KEY, open ? "1" : "0");
+  }, [open, inline]);
+
+  // Host pages open the chat without touching the launcher's markup:
+  //   document.dispatchEvent(new Event("hermes-chat:open"))
+  // and, for a click that happens before this component has mounted (the
+  // widget is usually lazy-loaded), `window.__hermesChatOpen = true` is
+  // honoured on mount so that first click is not lost.
+  useEffect(() => {
+    if (inline) return;
+    const w = window as Window & { __hermesChatOpen?: boolean };
+    const onOpen = () => {
+      writeSession(TEASER_KEY, "1");
+      setTeaserVisible(false);
+      setOpen(true);
+      setWelcomeShown(true);
+    };
+    if (w.__hermesChatOpen) {
+      w.__hermesChatOpen = false;
+      onOpen();
+    }
+    document.addEventListener("hermes-chat:open", onOpen);
+    return () => document.removeEventListener("hermes-chat:open", onOpen);
+  }, [inline]);
+
+  // Full-screen on phones: the page behind must not scroll while the chat is open.
+  useEffect(() => {
+    if (!open || inline || typeof window.matchMedia !== "function") return;
+    if (!window.matchMedia("(max-width: 480px)").matches) return;
+    const root = document.documentElement;
+    const prev = root.style.overflow;
+    root.style.overflow = "hidden";
+    return () => {
+      root.style.overflow = prev;
+    };
+  }, [open, inline]);
+
+  // After closing, focus returns to the launcher (keyboard and screen readers
+  // otherwise land at the top of the page).
+  useEffect(() => {
+    if (open || !restoreFocus.current) return;
+    restoreFocus.current = false;
+    launcherRef.current?.focus({ preventScroll: true });
   }, [open]);
 
   // Greeting bubble next to the closed launcher: once per tab, only while the
   // chat is closed and nothing has been said yet.
   useEffect(() => {
-    if (open || teaserDelay <= 0) return;
+    if (open || inline || teaserDelay <= 0) return;
     if (readSession(TEASER_KEY) === "1") return;
     const timer = setTimeout(() => {
       if (messageCount.current === 0) setTeaserVisible(true);
     }, teaserDelay);
     return () => clearTimeout(timer);
-  }, [open, teaserDelay]);
+  }, [open, inline, teaserDelay]);
 
   useEffect(() => {
     messagesEnd.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // On a touch screen focusing the input would raise the keyboard over the
+  // greeting and the suggestions, so there the panel itself takes focus and
+  // the visitor taps the input when ready.
   useEffect(() => {
-    if (open && !loading) {
-      const timer = setTimeout(() => inputRef.current?.focus(), 400);
-      return () => clearTimeout(timer);
-    }
-  }, [open, loading]);
+    if (!open || loading) return;
+    const timer = setTimeout(() => {
+      const coarse =
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(pointer: coarse)").matches;
+      if (coarse) {
+        if (!inline) windowRef.current?.focus({ preventScroll: true });
+      } else {
+        inputRef.current?.focus({ preventScroll: true });
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [open, loading, inline]);
 
   function dismissTeaser() {
     setTeaserVisible(false);
@@ -330,6 +404,8 @@ function ChatWidgetInner({
   }
 
   function closeChat() {
+    if (inline) return;
+    restoreFocus.current = true;
     setClosing(true);
     setTimeout(() => {
       setOpen(false);
@@ -365,6 +441,10 @@ function ChatWidgetInner({
 
   const chatWidth = expanded ? 480 : 380;
   const chatHeight = expanded ? "calc(100dvh - 48px)" : 540;
+  const srOnly = {
+    position: "absolute", width: 1, height: 1, padding: 0, margin: -1,
+    overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap", border: 0,
+  } as const;
 
   const bubbleBase = {
     maxWidth: "85%",
@@ -423,7 +503,7 @@ function ChatWidgetInner({
         }
       `}</style>
 
-      {!open && teaserVisible && (
+      {!inline && !open && teaserVisible && (
         <div
           className="chat-teaser"
           role="status"
@@ -466,8 +546,9 @@ function ChatWidgetInner({
         </div>
       )}
 
-      {!open && (
+      {!inline && !open && (
         <button
+          ref={launcherRef}
           className="chat-launcher"
           onClick={openChat}
           style={{
@@ -512,19 +593,36 @@ function ChatWidgetInner({
 
       {open && (
         <div
-          className={closing ? "chat-window-out" : "chat-window"}
-          role="dialog"
+          ref={windowRef}
+          tabIndex={-1}
+          className={inline ? "chat-inline" : closing ? "chat-window-out" : "chat-window"}
+          role={inline ? "region" : "dialog"}
           aria-label={`Chat con ${displayName}`}
-          style={{
-            position: "fixed", bottom: 24, right: 24, zIndex: 9998,
-            width: chatWidth, maxWidth: "calc(100vw - 48px)",
-            height: chatHeight, maxHeight: "calc(100dvh - 48px)",
-            background: "var(--chat-primary-fg, #fff)",
-            display: "flex", flexDirection: "column", borderRadius: 16,
-            boxShadow: "var(--chat-shadow-lg, 0 12px 48px rgba(0,0,0,.18))",
-            touchAction: "none",
-            transition: "width .25s ease, height .25s ease",
+          onKeyDown={(e) => {
+            if (e.key === "Escape" && !inline) closeChat();
           }}
+          style={
+            inline
+              ? {
+                  position: "relative", width: "100%", height: inlineHeight,
+                  background: "var(--chat-primary-fg, #fff)",
+                  display: "flex", flexDirection: "column", borderRadius: 16,
+                  border: "1px solid var(--chat-border, #E4E4E7)",
+                  boxShadow: "var(--chat-shadow, 0 8px 24px rgba(0,0,0,.12))",
+                  outline: "none",
+                }
+              : {
+                  position: "fixed", bottom: 24, right: 24, zIndex: 9998,
+                  width: chatWidth, maxWidth: "calc(100vw - 48px)",
+                  height: chatHeight, maxHeight: "calc(100dvh - 48px)",
+                  background: "var(--chat-primary-fg, #fff)",
+                  display: "flex", flexDirection: "column", borderRadius: 16,
+                  boxShadow: "var(--chat-shadow-lg, 0 12px 48px rgba(0,0,0,.18))",
+                  touchAction: "none",
+                  transition: "width .25s ease, height .25s ease",
+                  outline: "none",
+                }
+          }
         >
           <div style={{
             background: "var(--chat-primary, #6366F1)",
@@ -579,28 +677,32 @@ function ChatWidgetInner({
               >
                 <IconRestart />
               </button>
-              <button
-                className="chat-header-btn"
-                onClick={() => setExpanded((v) => !v)}
-                style={headerButton}
-                aria-label={expanded ? "Reducir chat" : "Ampliar chat"}
-                title={expanded ? "Reducir" : "Ampliar"}
-              >
-                {expanded ? <IconCollapse /> : <IconExpand />}
-              </button>
-              <button
-                className="chat-header-btn"
-                onClick={closeChat}
-                style={headerButton}
-                aria-label="Cerrar chat"
-                title="Cerrar"
-              >
-                <IconClose />
-              </button>
+              {!inline && (
+                <button
+                  className="chat-header-btn"
+                  onClick={() => setExpanded((v) => !v)}
+                  style={headerButton}
+                  aria-label={expanded ? "Reducir chat" : "Ampliar chat"}
+                  title={expanded ? "Reducir" : "Ampliar"}
+                >
+                  {expanded ? <IconCollapse /> : <IconExpand />}
+                </button>
+              )}
+              {!inline && (
+                <button
+                  className="chat-header-btn"
+                  onClick={closeChat}
+                  style={headerButton}
+                  aria-label="Cerrar chat"
+                  title="Cerrar"
+                >
+                  <IconClose />
+                </button>
+              )}
             </div>
           </div>
 
-          <div data-chat-messages style={{
+          <div data-chat-messages role="log" aria-live="polite" aria-relevant="additions text" aria-busy={loading} style={{
             flex: 1, overflowY: "auto", overscrollBehavior: "contain",
             touchAction: "pan-y", padding: "12px 16px",
             display: "flex", flexDirection: "column", gap: 10,
@@ -657,6 +759,7 @@ function ChatWidgetInner({
                       whiteSpace: "pre-wrap",
                     }}
                   >
+                    <span style={srOnly}>Tú: </span>
                     {msg.text}
                   </div>
                 );
@@ -698,6 +801,8 @@ function ChatWidgetInner({
                       borderBottomLeftRadius: 4,
                     }}
                   >
+                    <span style={srOnly}>{displayName}: </span>
+                    <span style={srOnly}>{displayName}: </span>
                     <span dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.text) }} />
                   </div>
                 </BotRow>
@@ -753,6 +858,7 @@ function ChatWidgetInner({
               }}
               placeholder={`Escribile a ${displayName}...`}
               aria-label="Mensaje"
+              maxLength={maxLength}
               disabled={loading}
               style={{
                 flex: 1, padding: "10px 14px", margin: 0,
@@ -781,6 +887,15 @@ function ChatWidgetInner({
               <IconSend />
             </button>
           </div>
+          {disclaimer && (
+            <div style={{
+              padding: "0 16px 10px", marginTop: -6, fontSize: 11, lineHeight: 1.35,
+              color: "var(--chat-muted, #71717A)",
+              fontFamily: "var(--chat-font-body, 'Nunito', sans-serif)",
+            }}>
+              {disclaimer}
+            </div>
+          )}
         </div>
       )}
     </>

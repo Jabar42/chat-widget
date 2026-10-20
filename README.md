@@ -33,16 +33,32 @@ import ChatWidget from "@tp3/chat-widget";
 | `teaserDelay` | `0` | Milisegundos hasta mostrar una burbuja de saludo junto al lanzador cerrado. `0` la desactiva. Se muestra una vez por pestaña |
 | `teaserMessage` | `welcomeMessage` | Texto de esa burbuja |
 | `launcherLabel` | `"Chatea con {agentName}"` | Texto de la píldora del lanzador |
+| `mode` | `"floating"` | `"inline"` dibuja solo el panel, siempre abierto, en el lugar donde se renderiza (una sección de la página). Sin lanzador ni burbuja de saludo |
+| `inlineHeight` | `560` | Alto del panel en modo `inline` |
+| `disclaimer` | — | Letra chica bajo la caja de texto («Asistente de IA. Puede equivocarse…») |
+| `maxLength` | `1500` | Tope de caracteres por mensaje |
 
 Sin `agentName` ni `avatarUrl` el widget se ve como en 0.2.x: nombre de la marca en la cabecera y lanzador con icono. En la cabecera hay tres botones: nueva conversación (borra el historial y abre una sesión nueva con el agente), ampliar/reducir y cerrar. La caja de texto crece hasta cuatro líneas (Enter envía, Shift+Enter salta de línea).
 
 ### Abrir el chat desde la página
 
-El lanzador lleva `data-chat-toggle`:
+Dos vías. Un evento, que funciona una vez montado el widget:
 
 ```js
-document.querySelector("[data-chat-toggle]")?.click();
+document.dispatchEvent(new Event("hermes-chat:open"));
 ```
+
+Y una bandera para el clic que llega **antes** de que el widget monte (normalmente se carga perezoso): el widget la lee al montar y abre.
+
+```js
+window.__hermesChatOpen = true;
+```
+
+El lanzador sigue llevando `data-chat-toggle` para quien prefiera hacerle clic.
+
+### Teclado y lectores de pantalla
+
+Escape cierra el panel y el foco vuelve al lanzador. En pantallas táctiles abrir el chat no levanta el teclado: primero se lee el saludo y las sugerencias. En el celular, con el chat a pantalla completa, la página de atrás no se desplaza. La lista de mensajes es un `role="log"` con `aria-live`, así que las respuestas se anuncian.
 
 ### Estado y privacidad
 

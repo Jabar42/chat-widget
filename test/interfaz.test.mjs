@@ -46,3 +46,11 @@ test("the UI carries the suggestion chips and the header actions", () => {
     assert.ok(bundle.includes(label), `header/teaser action "${label}" missing`);
   }
 });
+
+test("the UI carries the inline mode, the open event, and the live log", () => {
+  assert.ok(bundle.includes('"hermes-chat:open"'), "host-page open event missing");
+  assert.ok(bundle.includes("__hermesChatOpen"), "pre-mount open flag missing");
+  assert.ok(/role:\s*"log"/.test(bundle), "messages container is not a live log");
+  assert.ok(/role:\s*(inline|[a-z]) \? "region" : "dialog"|"region"/.test(bundle), "inline region role missing");
+  assert.ok(bundle.includes("chat-inline"), "inline panel class missing");
+});
