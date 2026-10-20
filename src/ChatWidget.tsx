@@ -469,6 +469,8 @@ function ChatWidgetInner({
   } as const;
 
   const online = status !== "disconnected";
+  const statusLabel =
+    status === "disconnected" ? "Sin conexión" : status === "connecting" ? "Conectando…" : onlineLabel;
 
   return (
     <>
@@ -652,13 +654,16 @@ function ChatWidgetInner({
                         aria-hidden="true"
                         style={{
                           width: 8, height: 8, borderRadius: "50%",
-                          background: online
-                            ? "var(--chat-online, #22C55E)"
-                            : "var(--chat-offline, #EF4444)",
+                          background:
+                            status === "disconnected"
+                              ? "var(--chat-offline, #EF4444)"
+                              : status === "connecting"
+                                ? "var(--chat-connecting, #F59E0B)"
+                                : "var(--chat-online, #22C55E)",
                           boxShadow: online ? "0 0 0 2px rgba(34,197,94,.25)" : "none",
                         }}
                       />
-                      {online ? onlineLabel : "Sin conexión"}
+                      {statusLabel}
                     </span>
                   )}
                   {onlineLabel && brandSubtitle && <span aria-hidden="true">·</span>}
