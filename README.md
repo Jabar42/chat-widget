@@ -26,6 +26,27 @@ import ChatWidget from "@tp3/chat-widget";
 | `brandName` | `"Tp3studio"` | Nombre en el header |
 | `brandSubtitle` | `"Asistente virtual"` | Subtítulo en el header |
 | `welcomeMessage` | `"👋 ¡Hola!..."` | Mensaje de bienvenida |
+| `agentName` | — | Nombre del agente («Mariana»). Pasa a ser el título de la cabecera y convierte el lanzador en una píldora con avatar y texto |
+| `avatarUrl` | — | Imagen del agente: lanzador, cabecera y al lado de cada respuesta. Sin imagen se usan las iniciales |
+| `onlineLabel` | `"En línea"` | Texto junto al punto verde de estado. `""` lo oculta. Con el socket caído muestra «Sin conexión» |
+| `suggestions` | `[]` | Preguntas sugeridas: chips bajo el saludo mientras la conversación está vacía. Al tocar una se envía |
+| `teaserDelay` | `0` | Milisegundos hasta mostrar una burbuja de saludo junto al lanzador cerrado. `0` la desactiva. Se muestra una vez por pestaña |
+| `teaserMessage` | `welcomeMessage` | Texto de esa burbuja |
+| `launcherLabel` | `"Chatea con {agentName}"` | Texto de la píldora del lanzador |
+
+Sin `agentName` ni `avatarUrl` el widget se ve como en 0.2.x: nombre de la marca en la cabecera y lanzador con icono. En la cabecera hay tres botones: nueva conversación (borra el historial y abre una sesión nueva con el agente), ampliar/reducir y cerrar. La caja de texto crece hasta cuatro líneas (Enter envía, Shift+Enter salta de línea).
+
+### Abrir el chat desde la página
+
+El lanzador lleva `data-chat-toggle`:
+
+```js
+document.querySelector("[data-chat-toggle]")?.click();
+```
+
+### Estado y privacidad
+
+El id de sesión, la conversación y el estado abierto/cerrado se guardan en `sessionStorage` (30 min de inactividad), nunca en `localStorage`: la charla puede llevar nombre y teléfono y no debe sobrevivir a la pestaña.
 
 ## Protocolo
 
@@ -53,6 +74,13 @@ Servidor -> {"type":"done","messageId":"msg_1"}
   --chat-shadow-lg: 0 12px 48px rgba(0,0,0,.18);
   --chat-code-bg: rgba(74,124,89,.12);
   --chat-close-btn-bg: rgba(255,255,255,.15);
+  --chat-close-btn-hover-bg: rgba(255,255,255,.25);
+  --chat-online: #22C55E;        /* punto de estado */
+  --chat-offline: #EF4444;
+  --chat-badge: #EF4444;         /* punto de «no leído» sobre el lanzador */
+  --chat-avatar-bg: rgba(255,255,255,.22); /* iniciales sobre el color primario */
+  --chat-chip-bg: transparent;   /* preguntas sugeridas */
+  --chat-chip-hover-bg: rgba(74,124,89,.12);
 }
 ```
 

@@ -45,9 +45,9 @@ export type Frame = FrameStatus | FrameToken | FrameDone | FrameError;
 export interface UseHermesChatOptions {
   /** WebSocket URL, e.g. "ws://vps-tp3.com:8765" or "wss://chat.tp3studio.com" */
   hermesUrl: string;
-  /** Optional session ID. Auto-generated with 30min localStorage TTL if omitted. */
+  /** Optional session ID. Auto-generated with a 30-min sessionStorage TTL if omitted. */
   sessionId?: string;
-  /** Unique agent/session namespace for localStorage key */
+  /** Unique agent/session namespace for the sessionStorage keys */
   sessionNamespace?: string;
 }
 
@@ -55,28 +55,50 @@ export interface UseHermesChatReturn {
   messages: Message[];
   status: Status;
   sendMessage: (text: string) => void;
+  /** Forgets the visible history and starts a new session with the agent. */
   clearHistory: () => void;
 }
 
 // ---------------------------------------------------------------------------
-// Session ID persistence (30-minute TTL, survives reloads)
+// Session ID persistence (30-minute TTL, survives reloads and in-tab
+// navigation). sessionStorage on purpose: the conversation can carry a name
+// and a phone number, so neither it nor its id may outlive the tab.
 // ---------------------------------------------------------------------------
+
+function createSessionId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function storeSessionId(namespace: string, id: string): void {
+  try {
+    const key = `hermes-chat-session-${namespace}`;
+    sessionStorage.setItem(key, id);
+    sessionStorage.setItem(`${key}-ts`, String(Date.now()));
+  } catch {
+    // storage unavailable — the id lives in memory for this mount only
+  }
+}
 
 function getOrCreateSessionId(namespace: string): string {
   if (typeof window === "undefined") return "ssr";
   const key = `hermes-chat-session-${namespace}`;
   const tsKey = `${key}-ts`;
-  const stored = localStorage.getItem(key);
-  const storedTs = localStorage.getItem(tsKey);
-  const now = Date.now();
   const TTL = 30 * 60 * 1000; // 30 minutes
-  if (stored && storedTs && now - Number(storedTs) < TTL) {
-    localStorage.setItem(tsKey, String(now)); // bump
-    return stored;
+  try {
+    const stored = sessionStorage.getItem(key);
+    const storedTs = sessionStorage.getItem(tsKey);
+    const now = Date.now();
+    if (stored && storedTs && now - Number(storedTs) < TTL) {
+      sessionStorage.setItem(tsKey, String(now)); // bump
+      return stored;
+    }
+  } catch {
+    // fall through: new id
   }
-  const id = crypto.randomUUID();
-  localStorage.setItem(key, id);
-  localStorage.setItem(tsKey, String(now));
+  const id = createSessionId();
+  storeSessionId(namespace, id);
   return id;
 }
 
@@ -93,8 +115,8 @@ function loadHistory(namespace: string): Message[] {
   try {
     const key = `hermes-chat-history-${namespace}`;
     const tsKey = `${key}-ts`;
-    const stored = localStorage.getItem(key);
-    const storedTs = localStorage.getItem(tsKey);
+    const stored = sessionStorage.getItem(key);
+    const storedTs = sessionStorage.getItem(tsKey);
     const now = Date.now();
     if (stored && storedTs && now - Number(storedTs) < HISTORY_TTL) {
       const parsed = JSON.parse(stored);
@@ -110,8 +132,8 @@ function saveHistory(namespace: string, messages: Message[]): void {
   if (typeof window === "undefined") return;
   try {
     const key = `hermes-chat-history-${namespace}`;
-    localStorage.setItem(key, JSON.stringify(messages));
-    localStorage.setItem(`${key}-ts`, String(Date.now()));
+    sessionStorage.setItem(key, JSON.stringify(messages));
+    sessionStorage.setItem(`${key}-ts`, String(Date.now()));
   } catch {
     // Storage full / unavailable — history is best-effort
   }
@@ -121,8 +143,8 @@ function clearStoredHistory(namespace: string): void {
   if (typeof window === "undefined") return;
   try {
     const key = `hermes-chat-history-${namespace}`;
-    localStorage.removeItem(key);
-    localStorage.removeItem(`${key}-ts`);
+    sessionStorage.removeItem(key);
+    sessionStorage.removeItem(`${key}-ts`);
   } catch {
     // ignore
   }
@@ -370,12 +392,19 @@ export function useHermesChat(
   );
 
   // ---- Clear history ----
+  // Also rotates the session id (unless the host pinned one): a "new
+  // conversation" must be new for the agent too, not just for the screen.
   const clearHistory = useCallback(() => {
     setMessages([]);
     currentTextRef.current = "";
     currentMsgIdRef.current = "";
     clearStoredHistory(namespace);
-  }, [namespace]);
+    if (!externalSessionId) {
+      const id = createSessionId();
+      sessionIdRef.current = id;
+      storeSessionId(namespace, id);
+    }
+  }, [namespace, externalSessionId]);
 
   return { messages, status, sendMessage, clearHistory };
 }
