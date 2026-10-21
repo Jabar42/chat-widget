@@ -1,6 +1,6 @@
 {
   "name": "@tp3/chat-widget",
-  "version": "0.2.5",
+  "version": "0.3.0",
   "description": "Chat widget React para Hermes Agent — WebSocket directo.",
   "repository": {
     "type": "git",
@@ -37,6 +37,12 @@
     "tsup": "^8.0.0",
     "typescript": "^5.0.0"
   },
-  "keywords": ["chat", "widget", "hermes", "websocket", "react"],
+  "keywords": [
+    "chat",
+    "widget",
+    "hermes",
+    "websocket",
+    "react"
+  ],
   "license": "MIT"
 }
