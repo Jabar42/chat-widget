@@ -1,0 +1,44 @@
+name: Publish to npm
+
+# Publicación por Trusted Publishing (OIDC): sin NPM_TOKEN y sin tokens que
+# eviten 2FA. npm 12 deprecó los granular access tokens con bypass-2FA, así que
+# este workflow es la vía vigente para publicar @tp3/chat-widget.
+#
+# Requiere, UNA vez, configurar el trusted publisher en npmjs.com:
+#   Package @tp3/chat-widget → Settings → Trusted Publisher → GitHub Actions
+#     Organization/User: Jabar42
+#     Repository:        chat-widget
+#     Workflow filename: publish.yml
+#     Environment:       (vacío)
+#
+# Después: crear un GitHub Release (o correr el workflow a mano) y npm publica
+# la versión que esté en package.json, con provenance.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # requerido para el intercambio OIDC con el registro npm
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install
+        run: npm ci
+
+      - name: Test (build + node --test)
+        run: npm test
+
+      - name: Publish
+        run: npm publish --access public --provenance
