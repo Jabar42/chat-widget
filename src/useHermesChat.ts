@@ -3,6 +3,11 @@
  *
  * Replaces useAgent() + useAgentChat() from @cloudflare/ai-chat + agents/react
  * with a direct WebSocket connection to the Hermes WebChat plugin.
+ *
+ * Beyond plain text it understands the plugin's rich frames: `card` (project
+ * card), `form` (lead form), `action` (a button) and `event` (a page-measurable
+ * event the widget re-emits as a CustomEvent). Any unknown frame type is
+ * ignored, so the hook stays forward compatible with a newer server.
  */
 
 import { useRef, useState, useCallback, useEffect } from "react";
@@ -11,11 +16,59 @@ import { useRef, useState, useCallback, useEffect } from "react";
 // Types
 // ---------------------------------------------------------------------------
 
+/** A button on a project card: opens `url`, or sends `send` as a user message. */
+export interface CardAction {
+  label: string;
+  url?: string;
+  send?: string;
+}
+
+/** A project card rendered inside the conversation. */
+export interface CardData {
+  id: string;
+  title: string;
+  subtitle?: string;
+  image?: string;
+  text?: string;
+  actions?: CardAction[];
+}
+
+/** A single field of a lead form. */
+export interface FormField {
+  name: string;
+  label: string;
+  type: "text" | "tel" | "email" | "hidden";
+  required?: boolean;
+  value?: string;
+}
+
+/** A lead form rendered inside the conversation. */
+export interface FormData {
+  id: string;
+  title?: string;
+  fields: FormField[];
+  submit?: string;
+}
+
+/** An action button pushed by the agent (e.g. a WhatsApp hand-off). */
+export interface ActionData {
+  kind: string;
+  label: string;
+  url: string;
+}
+
 export interface Message {
   id: string;
   role: "user" | "assistant";
   text: string;
   timestamp: number;
+  /** Present when the message is a rich widget rather than plain text. */
+  kind?: "card" | "form" | "action";
+  card?: CardData;
+  form?: FormData;
+  action?: ActionData;
+  /** A lead form is marked submitted so it cannot be sent twice. */
+  submitted?: boolean;
 }
 
 type Status = "idle" | "connecting" | "streaming" | "disconnected";
@@ -40,7 +93,38 @@ export interface FrameError {
   text: string;
 }
 
-export type Frame = FrameStatus | FrameToken | FrameDone | FrameError;
+export interface FrameCard {
+  type: "card";
+  card: CardData;
+}
+
+export interface FrameForm {
+  type: "form";
+  form: FormData;
+}
+
+export interface FrameAction {
+  type: "action";
+  kind: string;
+  label: string;
+  url: string;
+}
+
+export interface FrameEvent {
+  type: "event";
+  name: string;
+  data?: Record<string, unknown>;
+}
+
+export type Frame =
+  | FrameStatus
+  | FrameToken
+  | FrameDone
+  | FrameError
+  | FrameCard
+  | FrameForm
+  | FrameAction
+  | FrameEvent;
 
 export interface UseHermesChatOptions {
   /** WebSocket URL, e.g. "ws://vps-tp3.com:8765" or "wss://chat.tp3studio.com" */
@@ -55,6 +139,8 @@ export interface UseHermesChatReturn {
   messages: Message[];
   status: Status;
   sendMessage: (text: string) => void;
+  /** Submit a lead form filled inside the chat; marks the form as sent. */
+  sendFormSubmit: (formId: string, values: Record<string, string>) => void;
   /** Forgets the visible history and starts a new session with the agent. */
   clearHistory: () => void;
 }
@@ -150,6 +236,26 @@ function clearStoredHistory(namespace: string): void {
   }
 }
 
+let widgetSeq = 0;
+function widgetId(prefix: string): string {
+  widgetSeq += 1;
+  return `${prefix}-${Date.now()}-${widgetSeq}`;
+}
+
+/**
+ * Drop the empty assistant placeholder created by `sendMessage` when a rich
+ * frame arrives, so a card/form/action does not leave a blank bubble behind.
+ * The text of a later `token` then opens a fresh message (the placeholder is
+ * gone, so the id check in the token branch simply misses).
+ */
+function dropEmptyAssistant(prev: Message[]): Message[] {
+  const last = prev[prev.length - 1];
+  if (last && last.role === "assistant" && !last.kind && !last.text.trim()) {
+    return prev.slice(0, -1);
+  }
+  return prev;
+}
+
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
@@ -168,7 +274,13 @@ export function useHermesChat(
   // SSR guard: skip hook logic during server-side rendering
   const isSSR = typeof window === "undefined";
   if (isSSR) {
-    return { messages, status, sendMessage: () => {}, clearHistory: () => {} };
+    return {
+      messages,
+      status,
+      sendMessage: () => {},
+      sendFormSubmit: () => {},
+      clearHistory: () => {},
+    };
   }
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -200,7 +312,11 @@ export function useHermesChat(
         setMessages((prev) => {
           const copy = [...prev];
           const last = copy[copy.length - 1];
-          if (last?.role === "assistant" && last.id === currentMsgIdRef.current) {
+          if (
+            last?.role === "assistant" &&
+            !last.kind &&
+            last.id === currentMsgIdRef.current
+          ) {
             copy[copy.length - 1] = { ...last, text: currentTextRef.current };
             return copy;
           }
@@ -243,6 +359,60 @@ export function useHermesChat(
         }
         break;
 
+      case "card":
+        setMessages((prev) => [
+          ...dropEmptyAssistant(prev),
+          {
+            id: widgetId("card"),
+            role: "assistant",
+            text: "",
+            timestamp: Date.now(),
+            kind: "card",
+            card: frame.card,
+          },
+        ]);
+        break;
+
+      case "form":
+        setMessages((prev) => [
+          ...dropEmptyAssistant(prev),
+          {
+            id: widgetId("form"),
+            role: "assistant",
+            text: "",
+            timestamp: Date.now(),
+            kind: "form",
+            form: frame.form,
+          },
+        ]);
+        break;
+
+      case "action":
+        setMessages((prev) => [
+          ...dropEmptyAssistant(prev),
+          {
+            id: widgetId("action"),
+            role: "assistant",
+            text: "",
+            timestamp: Date.now(),
+            kind: "action",
+            action: { kind: frame.kind, label: frame.label, url: frame.url },
+          },
+        ]);
+        break;
+
+      case "event":
+        // The widget never draws events: it re-emits them to the page so the
+        // site's own analytics (GA4, Meta Pixel) can measure the conversion.
+        try {
+          window.dispatchEvent(
+            new CustomEvent(`chat:${frame.name}`, { detail: frame.data ?? {} })
+          );
+        } catch {
+          // CustomEvent unsupported — ignore
+        }
+        break;
+
       case "error":
         if (streamTimeout.current) {
           clearTimeout(streamTimeout.current);
@@ -258,6 +428,10 @@ export function useHermesChat(
           },
         ]);
         setStatus("idle");
+        break;
+
+      default:
+        // Unknown frame type: ignore, stay forward compatible.
         break;
     }
   }, []);
@@ -391,6 +565,34 @@ export function useHermesChat(
     [connect]
   );
 
+  // ---- Submit a lead form filled inside the chat ----
+  const sendFormSubmit = useCallback(
+    (formId: string, values: Record<string, string>) => {
+      // Mark the form sent first: even if the socket is momentarily down the
+      // visitor must not be able to send it twice.
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.kind === "form" && m.form?.id === formId
+            ? { ...m, submitted: true }
+            : m
+        )
+      );
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+        connect();
+        return;
+      }
+      wsRef.current.send(
+        JSON.stringify({
+          type: "form_submit",
+          formId,
+          sessionId: sessionIdRef.current,
+          values,
+        })
+      );
+    },
+    [connect]
+  );
+
   // ---- Clear history ----
   // Also rotates the session id (unless the host pinned one): a "new
   // conversation" must be new for the agent too, not just for the screen.
@@ -406,5 +608,5 @@ export function useHermesChat(
     }
   }, [namespace, externalSessionId]);
 
-  return { messages, status, sendMessage, clearHistory };
+  return { messages, status, sendMessage, sendFormSubmit, clearHistory };
 }

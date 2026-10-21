@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import type { ReactNode } from "react";
 import { useHermesChat } from "./useHermesChat";
-import type { Message } from "./useHermesChat";
+import type { ActionData, CardData, FormData, Message } from "./useHermesChat";
 
 export interface ChatWidgetProps {
   /** WebSocket URL for the Hermes WebChat plugin, e.g. "ws://vps-tp3.com:8765" */
@@ -226,6 +226,11 @@ const IconRestart = () => (
     <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
   </svg>
 );
+const IconWhatsApp = () => (
+  <svg width={18} height={18} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M12.04 2c-5.46 0-9.9 4.44-9.9 9.9 0 1.75.46 3.45 1.32 4.95L2 22l5.3-1.38c1.45.79 3.08 1.21 4.74 1.21 5.46 0 9.9-4.44 9.9-9.9S17.5 2 12.04 2zm0 18.15c-1.48 0-2.93-.4-4.2-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.2 8.2 0 0 1-1.26-4.38c0-4.54 3.7-8.24 8.25-8.24 4.54 0 8.24 3.7 8.24 8.24s-3.7 8.24-8.24 8.24zm4.52-6.16c-.25-.12-1.47-.72-1.69-.81-.23-.08-.39-.12-.56.12-.16.25-.64.81-.78.97-.14.17-.29.19-.54.06-.25-.12-1.05-.39-1.99-1.23-.74-.66-1.23-1.47-1.38-1.72-.14-.25-.01-.38.11-.5.11-.11.25-.29.37-.43.13-.14.17-.25.25-.41.08-.17.04-.31-.02-.43-.06-.12-.56-1.34-.76-1.84-.2-.48-.4-.42-.56-.43h-.48c-.17 0-.43.06-.66.31-.22.25-.86.85-.86 2.07 0 1.22.89 2.4 1.01 2.56.12.17 1.75 2.67 4.23 3.74.59.26 1.05.41 1.41.52.59.19 1.13.16 1.56.1.48-.07 1.47-.6 1.68-1.18.21-.58.21-1.07.14-1.18-.06-.11-.22-.17-.47-.29z" />
+  </svg>
+);
 
 // ---------------------------------------------------------------------------
 // Inner component — only rendered on the client
@@ -262,7 +267,7 @@ function ChatWidgetInner({
   const messagesEnd = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const { messages, status, sendMessage, clearHistory } = useHermesChat({
+  const { messages, status, sendMessage, sendFormSubmit, clearHistory } = useHermesChat({
     hermesUrl,
     sessionNamespace: "default",
   });
@@ -638,8 +643,51 @@ function ChatWidgetInner({
               </div>
             )}
 
-            {allMessages.map((msg: Message) =>
-              msg.role === "assistant" ? (
+            {allMessages.map((msg: Message) => {
+              if (msg.role === "user") {
+                return (
+                  <div
+                    key={msg.id}
+                    style={{
+                      ...bubbleBase,
+                      alignSelf: "flex-end",
+                      background: "var(--chat-primary, #6366F1)",
+                      color: "var(--chat-primary-fg, #fff)",
+                      borderBottomRightRadius: 4,
+                      whiteSpace: "pre-wrap",
+                    }}
+                  >
+                    {msg.text}
+                  </div>
+                );
+              }
+              if (msg.kind === "card" && msg.card) {
+                return (
+                  <BotRow key={msg.id} show={hasIdentity} url={avatarUrl} name={displayName}>
+                    <CardBubble card={msg.card} onSend={send} disabled={loading} />
+                  </BotRow>
+                );
+              }
+              if (msg.kind === "form" && msg.form) {
+                return (
+                  <BotRow key={msg.id} show={hasIdentity} url={avatarUrl} name={displayName}>
+                    <FormBubble
+                      form={msg.form}
+                      submitted={Boolean(msg.submitted)}
+                      onSubmit={(values) => sendFormSubmit(msg.form!.id, values)}
+                      disabled={loading}
+                    />
+                  </BotRow>
+                );
+              }
+              if (msg.kind === "action" && msg.action) {
+                return (
+                  <BotRow key={msg.id} show={hasIdentity} url={avatarUrl} name={displayName}>
+                    <ActionBubble action={msg.action} />
+                  </BotRow>
+                );
+              }
+              return (
                 <BotRow key={msg.id} show={hasIdentity} url={avatarUrl} name={displayName}>
                   <div
                     className="bot-msg"
@@ -653,22 +701,8 @@ function ChatWidgetInner({
                     <span dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.text) }} />
                   </div>
                 </BotRow>
-              ) : (
-                <div
-                  key={msg.id}
-                  style={{
-                    ...bubbleBase,
-                    alignSelf: "flex-end",
-                    background: "var(--chat-primary, #6366F1)",
-                    color: "var(--chat-primary-fg, #fff)",
-                    borderBottomRightRadius: 4,
-                    whiteSpace: "pre-wrap",
-                  }}
-                >
-                  {msg.text}
-                </div>
-              )
-            )}
+              );
+            })}
 
             {loading && (
               <BotRow show={hasIdentity} url={avatarUrl} name={displayName}>
@@ -750,6 +784,210 @@ function ChatWidgetInner({
         </div>
       )}
     </>
+  );
+}
+
+/** A project card: photo, title, subtitle, text and action buttons. */
+function CardBubble({
+  card,
+  onSend,
+  disabled,
+}: {
+  card: CardData;
+  onSend: (text: string) => void;
+  disabled: boolean;
+}) {
+  return (
+    <div
+      data-chat-card={card.id}
+      style={{
+        width: 268, maxWidth: "88%",
+        background: "var(--chat-primary-fg, #fff)",
+        border: "1px solid var(--chat-border, #E4E4E7)",
+        borderRadius: 16, borderBottomLeftRadius: 4,
+        overflow: "hidden",
+        boxShadow: "var(--chat-shadow, 0 8px 24px rgba(0,0,0,.08))",
+      }}
+    >
+      {card.image && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={card.image}
+          alt=""
+          style={{ width: "100%", height: 120, objectFit: "cover", display: "block" }}
+        />
+      )}
+      <div style={{ padding: "10px 12px 12px" }}>
+        <div style={{ fontWeight: 600, fontSize: 14, color: "var(--chat-bot-text, #18181B)" }}>
+          {card.title}
+        </div>
+        {card.subtitle && (
+          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--chat-primary, #6366F1)", marginTop: 2 }}>
+            {card.subtitle}
+          </div>
+        )}
+        {card.text && (
+          <div style={{ fontSize: 13, color: "var(--chat-bot-text, #18181B)", opacity: 0.8, marginTop: 6, lineHeight: 1.4 }}>
+            {card.text}
+          </div>
+        )}
+        {card.actions && card.actions.length > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
+            {card.actions.map((a, i) => (
+              <button
+                key={`${a.label}-${i}`}
+                type="button"
+                data-chat-card-action={a.url ? "link" : "send"}
+                disabled={disabled}
+                onClick={() => {
+                  if (a.url) window.open(a.url, "_blank", "noopener,noreferrer");
+                  else if (a.send) onSend(a.send);
+                }}
+                style={{
+                  background: a.url ? "var(--chat-primary, #6366F1)" : "transparent",
+                  color: a.url ? "var(--chat-primary-fg, #fff)" : "var(--chat-primary, #6366F1)",
+                  border: a.url ? "none" : "1px solid var(--chat-primary, #6366F1)",
+                  borderRadius: 10, padding: "7px 12px", fontSize: 13,
+                  cursor: disabled ? "default" : "pointer", fontFamily: "inherit", fontWeight: 600,
+                  opacity: disabled ? 0.5 : 1,
+                }}
+              >
+                {a.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** A lead form rendered inside the chat; disables itself once submitted. */
+function FormBubble({
+  form,
+  submitted,
+  onSubmit,
+  disabled,
+}: {
+  form: FormData;
+  submitted: boolean;
+  onSubmit: (values: Record<string, string>) => void;
+  disabled: boolean;
+}) {
+  const visible = form.fields.filter((f) => f.type !== "hidden");
+  const [values, setValues] = useState<Record<string, string>>(() => {
+    const init: Record<string, string> = {};
+    for (const f of form.fields) if (f.type === "hidden" && f.value != null) init[f.name] = f.value;
+    return init;
+  });
+  const [error, setError] = useState("");
+
+  function submit() {
+    if (disabled || submitted) return;
+    for (const f of visible) {
+      if (f.required && !String(values[f.name] ?? "").trim()) {
+        setError(`Completá «${f.label}».`);
+        return;
+      }
+    }
+    const tel = visible.find((f) => f.type === "tel");
+    if (tel && values[tel.name] && !/^[+\d][\d\s().-]{5,}$/.test(values[tel.name])) {
+      setError("Revisá el número de teléfono.");
+      return;
+    }
+    setError("");
+    onSubmit(values);
+  }
+
+  const fieldStyle = {
+    width: "100%", boxSizing: "border-box" as const, marginTop: 4,
+    padding: "8px 10px", border: "1px solid var(--chat-border, #E4E4E7)",
+    borderRadius: 10, fontSize: 14, outline: "none",
+    fontFamily: "var(--chat-font-body, 'Nunito', sans-serif)",
+  } as const;
+
+  return (
+    <div
+      data-chat-form={form.id}
+      style={{
+        width: 268, maxWidth: "88%",
+        background: "var(--chat-primary-fg, #fff)",
+        border: "1px solid var(--chat-border, #E4E4E7)",
+        borderRadius: 16, borderBottomLeftRadius: 4,
+        padding: "12px", boxShadow: "var(--chat-shadow, 0 8px 24px rgba(0,0,0,.08))",
+      }}
+    >
+      <div style={{ fontWeight: 600, fontSize: 14, color: "var(--chat-bot-text, #18181B)" }}>
+        {form.title || "Tus datos"}
+      </div>
+      {submitted ? (
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--chat-online, #22C55E)", marginTop: 8 }}>
+          ✓ Enviado. ¡Gracias!
+        </div>
+      ) : (
+        <>
+          {visible.map((f) => (
+            <label
+              key={f.name}
+              style={{ display: "block", marginTop: 10, fontSize: 12, color: "var(--chat-bot-text, #18181B)" }}
+            >
+              {f.label}
+              {f.required ? " *" : ""}
+              <input
+                type={f.type === "tel" ? "tel" : f.type === "email" ? "email" : "text"}
+                value={values[f.name] ?? ""}
+                disabled={disabled}
+                onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
+                style={fieldStyle}
+              />
+            </label>
+          ))}
+          {error && (
+            <div style={{ fontSize: 12, color: "var(--chat-offline, #EF4444)", marginTop: 8 }}>{error}</div>
+          )}
+          <button
+            type="button"
+            onClick={submit}
+            disabled={disabled}
+            data-chat-form-submit=""
+            style={{
+              width: "100%", marginTop: 12,
+              background: "var(--chat-primary, #6366F1)",
+              color: "var(--chat-primary-fg, #fff)",
+              border: "none", borderRadius: 10, padding: "10px 12px",
+              fontSize: 14, fontWeight: 600, fontFamily: "inherit",
+              cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.5 : 1,
+            }}
+          >
+            {form.submit || "Enviar"}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** An action button pushed by the agent (e.g. a WhatsApp hand-off). */
+function ActionBubble({ action }: { action: ActionData }) {
+  const isWhatsApp = action.kind === "whatsapp";
+  return (
+    <a
+      href={action.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      data-chat-action={action.kind}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 8,
+        background: isWhatsApp ? "var(--chat-wa, #25D366)" : "var(--chat-primary, #6366F1)",
+        color: "#fff", textDecoration: "none",
+        borderRadius: 12, padding: "10px 16px",
+        fontSize: 14, fontWeight: 600,
+        fontFamily: "var(--chat-font-body, 'Nunito', sans-serif)",
+      }}
+    >
+      {isWhatsApp && <IconWhatsApp />}
+      {action.label}
+    </a>
   );
 }
 
