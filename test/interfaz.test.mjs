@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { renderMarkdown } from "../dist/ChatWidget.mjs";
+import { renderMarkdown, visibleMessages } from "../dist/ChatWidget.mjs";
 
 /**
  * Contract tests for the identity/greeting/suggestions UI and for the two
@@ -45,4 +45,28 @@ test("the UI carries the suggestion chips and the header actions", () => {
   for (const label of ["Nueva conversaci", "Ampliar chat", "Reducir chat", "Cerrar saludo"]) {
     assert.ok(bundle.includes(label), `header/teaser action "${label}" missing`);
   }
+});
+
+test("the UI carries the inline mode, the open event, and the live log", () => {
+  assert.ok(bundle.includes('"hermes-chat:open"'), "host-page open event missing");
+  assert.ok(bundle.includes("__hermesChatOpen"), "pre-mount open flag missing");
+  assert.ok(/role:\s*"log"/.test(bundle), "messages container is not a live log");
+  assert.ok(/role:\s*(inline|[a-z]) \? "region" : "dialog"|"region"/.test(bundle), "inline region role missing");
+  assert.ok(bundle.includes("chat-inline"), "inline panel class missing");
+});
+
+test("an assistant turn without text yet is not drawn as an empty bubble", () => {
+  // sendMessage appends an empty assistant placeholder; while it is empty the
+  // typing indicator stands for it. Reported 20-oct-2026: two bubbles while thinking.
+  const turn = [
+    { id: "u1", role: "user", text: "Hola", timestamp: 1 },
+    { id: "a1", role: "assistant", text: "", timestamp: 2 },
+  ];
+  assert.deepEqual(visibleMessages(turn).map((m) => m.id), ["u1"]);
+  const streamed = [...turn.slice(0, 1), { ...turn[1], text: "¡Hola!" }];
+  assert.deepEqual(visibleMessages(streamed).map((m) => m.id), ["u1", "a1"]);
+  // a rich frame (card/form/action) has no text but is content, and stays
+  assert.equal(visibleMessages([{ id: "c1", role: "assistant", kind: "card", text: "", timestamp: 3 }]).length, 1);
+  // an empty *user* message is the user's own doing and stays
+  assert.equal(visibleMessages([{ id: "u2", role: "user", text: "", timestamp: 3 }]).length, 1);
 });
