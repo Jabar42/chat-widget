@@ -817,7 +817,6 @@ function ChatWidgetInner({
                     }}
                   >
                     <span style={srOnly}>{displayName}: </span>
-                    <span style={srOnly}>{displayName}: </span>
                     <span dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.text) }} />
                   </div>
                 </BotRow>
