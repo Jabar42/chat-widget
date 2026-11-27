@@ -34,6 +34,11 @@ jobs:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
+      # Trusted Publishing exige npm >= 11.5.1; Node 22 trae npm 10 y el
+      # publish termina en un 404 engañoso (sin OIDC no hay credencial).
+      - name: Actualizar npm
+        run: npm install -g npm@latest
+
       - name: Install
         run: npm ci
 
